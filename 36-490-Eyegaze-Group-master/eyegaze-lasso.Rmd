@@ -1,0 +1,131 @@
+title: "eyegaze random forest"
+output: 
+  html_document:
+    toc:  true
+    toc_float:  true
+    code_folding:  show
+---
+
+```{r, message = FALSE, error = FALSE}
+library(glmnet)
+```
+
+```{r}
+eyegaze <- read.csv("Eyetracking_Data.csv",na.string=c("999","999.00","#NULL!"),stringsAsFactors = FALSE)
+#Remove the NA values
+eyegaze <- na.omit(eyegaze)
+#setting id, dot and dob to null since they are not in our concern
+eyegaze$ID <- NULL
+eyegaze$DOT <- NULL
+eyegaze$DOB <- NULL
+#Since compdiff is calculated directly from the following variables, we remove them from the dataset. 
+eyegaze$Comp_E_Percent <- NULL
+eyegaze$Comp_E_Total <- NULL
+eyegaze$Comp_Percent <- NULL
+eyegaze$Comp_Total <- NULL
+eyegaze$Comp_S_Total <- NULL
+eyegaze$Comp_S_Percent <- NULL
+```
+
+```{r}
+set.seed(110)
+#setting training and testing datasets.
+train.index <- sample(1:nrow(eyegaze), 0.7*nrow(eyegaze))
+train <- eyegaze[train.index, ]
+test <- eyegaze [-train.index, ]
+
+#build x matrix for lasso,elnet and ridge
+x <- model.matrix(CompDiff~., train)[,-1]
+y <- train$CompDiff
+
+x.test <- model.matrix(CompDiff~., test)[,-1]
+y.test <- test$CompDiff
+
+#fitting the model
+fit.lasso <- glmnet(x, y,family="gaussian", alpha=1)
+fit.ridge <- glmnet(x, y,family="gaussian", alpha=0)
+fit.elnet <- glmnet(x, y,family="gaussian", alpha=.5)
+```
+
+
+
+```{r}
+#using cross validation to find the most appropriate(lowest mse) lambda values for the three models.
+fit.lasso.cv <- cv.glmnet(x, y, type.measure="mse", alpha=1, 
+                          family="gaussian")
+fit.ridge.cv <- cv.glmnet(x, y, type.measure="mse", alpha=0,
+                          family="gaussian")
+fit.elnet.cv <- cv.glmnet(x, y, type.measure="mse", alpha=.5,
+                          family="gaussian")
+
+```
+
+
+```{r}
+for (i in 0:10) {
+    assign(paste("fit", i, sep=""), cv.glmnet(x, y, type.measure="mse", 
+                                              alpha=i/10,family="gaussian"))
+}
+```
+
+```{r}
+# Plot solution paths:
+par(mfrow=c(3,2))
+
+plot(fit.lasso, xvar="lambda")
+plot(fit10, main="LASSO")
+
+plot(fit.ridge, xvar="lambda")
+plot(fit0, main="Ridge")
+
+plot(fit.elnet, xvar="lambda")
+plot(fit5, main="Elastic Net")
+```
+
+Calculating MSE's for the alpha value in the elastic net model.
+
+```{r}
+yhat0 <- predict(fit0, s=fit0$lambda.1se, newx=x.test)
+yhat1 <- predict(fit1, s=fit1$lambda.1se, newx=x.test)
+yhat2 <- predict(fit2, s=fit2$lambda.1se, newx=x.test)
+yhat3 <- predict(fit3, s=fit3$lambda.1se, newx=x.test)
+yhat4 <- predict(fit4, s=fit4$lambda.1se, newx=x.test)
+yhat5 <- predict(fit5, s=fit5$lambda.1se, newx=x.test)
+yhat6 <- predict(fit6, s=fit6$lambda.1se, newx=x.test)
+yhat7 <- predict(fit7, s=fit7$lambda.1se, newx=x.test)
+yhat8 <- predict(fit8, s=fit8$lambda.1se, newx=x.test)
+yhat9 <- predict(fit9, s=fit9$lambda.1se, newx=x.test)
+yhat10 <- predict(fit10, s=fit10$lambda.1se, newx=x.test)
+
+mse0 <- mean((y.test - yhat0)^2)
+mse1 <- mean((y.test - yhat1)^2)
+mse2 <- mean((y.test - yhat2)^2)
+mse3 <- mean((y.test - yhat3)^2)
+mse4 <- mean((y.test - yhat4)^2)
+mse5 <- mean((y.test - yhat5)^2)
+mse6 <- mean((y.test - yhat6)^2)
+mse7 <- mean((y.test - yhat7)^2)
+mse8 <- mean((y.test - yhat8)^2)
+mse9 <- mean((y.test - yhat9)^2)
+mse10 <- mean((y.test - yhat10)^2)
+
+for(i in 1:10){
+  name = paste("mse",i,sep="")
+  print(eval(as.name(name)))
+}
+```
+
+After we have the best lambda values, we fit the model and examine the coefficients. If a variable's coefficient is a ".", it means it is assigned to be zero. As we can see, a lot of variables in the LASSO model has coefficients 0, which indicates that they are not important. However, one thing to keep in mind is that for LASSO, when the dataset has a bunch of highly correlated variables, such as most of the eyegaze variables, the LASSO tends to choose one of them and set the coefficient to non-zero values, while the others are set to zero. Thus, if one of the eyegaze variables has non-zero coefficient, most of the eyegaze variables are likely to be important.  
+
+```{r}
+bestlam = fit.lasso.cv$lambda.min
+predict(fit.lasso, type = 'coefficients', s = bestlam)
+bestlam = fit.ridge.cv$lambda.min
+predict(fit.ridge, type = 'coefficients', s = bestlam)
+bestlam = fit.elnet.cv$lambda.min
+predict(fit.elnet, type = 'coefficients', s = bestlam)
+coef(fit.lasso)
+```
+
+
+

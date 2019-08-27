@@ -1,0 +1,168 @@
+
+title: "eyegaze random forest"
+output: 
+  html_document:
+    toc:  true
+    toc_float:  true
+    code_folding:  show
+---
+```{r, message = FALSE, error = FALSE}
+library(glmnet)
+```
+
+This part of the code conducts the omitted variable bias analysis. This process simply means taking one variable out of the model each time and calculate the change in MSE(goodness-of-fit) between the original model,with that variable included, and the new model, without that variable. If the change in MSE is negative, meaning the model got better after removing the variable, it is likely that this variable is not important. However, if the change in MSE is positive, it is likely that the variable is important since removing this variable leads to less precision of the model.  
+
+This process is done on LASSO, ridge and elastic net regressions.  
+
+```{r}
+eyegaze <- read.csv("Eyetracking_Data.csv",na.string=c("999","999.00","#NULL!"),stringsAsFactors = FALSE)
+eyegaze <- na.omit(eyegaze)
+eyegaze$ID <- NULL
+eyegaze$DOT <- NULL
+eyegaze$DOB <- NULL
+eyegaze$Comp_E_Percent <- NULL
+eyegaze$Comp_E_Total <- NULL
+eyegaze$Comp_Percent <- NULL
+eyegaze$Comp_Total <- NULL
+eyegaze$Comp_S_Total <- NULL
+eyegaze$Comp_S_Percent <- NULL
+```
+
+```{r}
+set.seed(100)
+train.index <- sample(1:nrow(eyegaze), 0.7*nrow(eyegaze))
+train <- eyegaze[train.index, ]
+test <- eyegaze [-train.index, ]
+
+x <- model.matrix(CompDiff~., train)[,-1]
+y <- train$CompDiff
+
+x.test <- model.matrix(CompDiff~., test)[,-1]
+y.test <- test$CompDiff
+
+fit.lasso <- glmnet(x, y,family="gaussian", alpha=1)
+fit.ridge <- glmnet(x, y,family="gaussian", alpha=0)
+fit.elnet <- glmnet(x, y,family="gaussian", alpha=.5)
+
+```
+
+
+```{r,cache=TRUE}
+xs = list()
+for (i in 1:77){
+  if(i != 33){
+    xs[[i]] <- model.matrix(CompDiff~., train[,-i])[,-1]
+  }
+}
+
+
+xs.test = list()
+for (i in 1:77){
+  if(i != 33){
+    xs.test[[i]] <- model.matrix(CompDiff~., test[,-i])[,-1]
+  }
+}
+
+mse.lasso <- list()
+mse.ridge <- list()
+mse.elnet <- list()
+
+for (i in 1:77){
+  if(i != 33){
+    fit.lasso.xs <- cv.glmnet(xs[[1]], y, type.measure="mse", alpha=1, 
+                            family="gaussian")
+    fit.ridge.xs <- cv.glmnet(xs[[1]], y, type.measure="mse", alpha=0, 
+                            family="gaussian")
+    fit.elnet.xs <- cv.glmnet(xs[[1]], y, type.measure="mse", alpha=0.5, 
+                            family="gaussian")
+    yhat.lasso <- predict(fit.lasso.xs, s=fit.lasso.xs$lambda.1se, newx=xs.test[[i]])
+    yhat.ridge <- predict(fit.ridge.xs, s=fit.ridge.xs$lambda.1se, newx=xs.test[[i]])
+    yhat.elnet <- predict(fit.elnet.xs, s=fit.elnet.xs$lambda.1se, newx=xs.test[[i]])
+    mse.lasso[[i]] <- mean((y.test - yhat.lasso)^2)
+    mse.ridge[[i]] <- mean((y.test - yhat.ridge)^2)
+    mse.elnet[[i]] <- mean((y.test - yhat.elnet)^2)
+  }
+}
+
+```
+
+
+
+
+```{r}
+fit.lasso.cv <- cv.glmnet(x, y, type.measure="mse", alpha=1, 
+                          family="gaussian")
+fit.ridge.cv <- cv.glmnet(x, y, type.measure="mse", alpha=0,
+                          family="gaussian")
+fit.elnet.cv <- cv.glmnet(x, y, type.measure="mse", alpha=.5,
+                          family="gaussian")
+yhat.lasso.normal <- predict(fit.lasso.cv, s=fit.lasso.cv$lambda.1se, newx=x.test)
+yhat.ridge.normal <- predict(fit.ridge.cv, s=fit.ridge.cv$lambda.1se, newx=x.test)
+yhat.elnet.normal <- predict(fit.elnet.cv, s=fit.elnet.cv$lambda.1se, newx=x.test)
+mse.lasso.normal <- mean((y.test - yhat.lasso.normal)^2)
+mse.ridge.normal <- mean((y.test - yhat.ridge.normal)^2)
+mse.elnet.normal <- mean((y.test - yhat.elnet.normal)^2)
+```
+```{r}
+dim(x)
+```
+
+```{r}
+lasso.diff <- unlist(mse.lasso) - mse.lasso.normal
+ridge.diff <- unlist(mse.ridge) - mse.ridge.normal
+elnet.diff <- unlist(mse.elnet) - mse.elnet.normal
+```
+
+```{r}
+head(eyegaze)
+```
+
+The results are shown in the plots below. Since most of the eyegaze variables have positive MSE change, they are important. For the demographic and behavioral variables, they are not so important as they have 0 or negative MSE change.  
+
+```{r, message = FALSE, warning = FALSE}
+library(ggplot2)
+library(dplyr)
+idx = seq(1, 76, 1)
+lasso.data <- data.frame(lasso.diff,idx)
+lasso.data <- lasso.data %>% mutate(group = cut(idx, c(0, 10, 33, Inf),
+                                    labels = c("Demographic", "Behavioral Measures", "Eye-tracking Data")))
+ggplot(lasso.data, aes(y = lasso.diff, x = idx, color = group)) + 
+  geom_point() +
+  geom_hline(yintercept = 0, col = "red") +
+  theme_bw() + 
+  labs(title = "MSE change in LASSO",
+       x = "Variable Index",
+       y = "Difference in MSE") +
+  scale_color_manual(values = c("#999999", "#E69F00", "cornflowerblue"))
+```
+
+```{r}
+idx = seq(1, 76, 1)
+ridge.data <- data.frame(ridge.diff,idx)
+ridge.data <- ridge.data %>% mutate(group = cut(idx, c(0, 10, 33, Inf),
+                                    labels = c("Demographic", "Behavioral Measures", "Eye-tracking Data")))
+ggplot(ridge.data, aes(y = ridge.diff, x = idx, color = group)) + 
+  geom_point() +
+  geom_hline(yintercept = 0, col = "red") +
+  theme_bw() + 
+  labs(title = "MSE change in Ridge",
+       x = "Variable Index",
+       y = "Difference in MSE") +
+  scale_color_manual(values = c("#999999", "#E69F00", "cornflowerblue"))
+```
+```{r}
+idx = seq(1, 76, 1)
+elnet.data <- data.frame(elnet.diff,idx)
+elnet.data <- elnet.data %>% mutate(group = cut(idx, c(0, 10, 33, Inf),
+                                    labels = c("Demographic", "Behavioral Measures", "Eye-tracking Data")))
+ggplot(elnet.data, aes(y = elnet.diff, x = idx, color = group)) + 
+  geom_point() +
+  geom_hline(yintercept = 0, col = "red") +
+  theme_bw() + 
+  labs(title = "MSE change in Elastic Net",
+       x = "Variable Index",
+       y = "Difference in MSE") +
+  scale_color_manual(values = c("#999999", "#E69F00", "cornflowerblue"))
+```
+
+
